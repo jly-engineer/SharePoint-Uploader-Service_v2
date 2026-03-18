@@ -1,0 +1,31 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment (Crucial to ignore!)
+venv/
+.venv/
+env/
+bin/
+include/
+lib/
+share/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Unit test / coverage reports
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments (Secrets/Config)
+.env
+.flaskenv
+
+# OS generated files
+.DS_Store
+Thumbs.db

@@ -2,4 +2,4 @@ watchdog==4.0.1
 msal==1.29.0
 requests==2.32.3
 pyinstaller==6.8.0
-pypiwin32==223
+pypiwin32==223; sys_platform == "win32"
