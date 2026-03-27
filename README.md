@@ -66,6 +66,7 @@ The final installer will be at `dist\installer_gui.exe`.
 1. Run the build_installer.bat
 The `build_installer.bat` will compile both the `installer_gui.exe` and the `uploader_service.exe` into a single installation SharePointUploaderSetup.exe
 
+### CMD or Terminal
 1. Run `dist\installer_gui.exe` as **Administrator** (it will prompt for elevation automatically).
 2. Fill in your Azure AD credentials and paths:
    - **Tenant ID / Client ID / Client Secret** — from your app registration
