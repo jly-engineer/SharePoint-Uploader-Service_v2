@@ -31,28 +31,6 @@ Grant admin consent after adding the permissions. You will need:
 pip install pywin32 msal requests watchdog pyinstaller
 ```
 
-## Building Windows Executables
-
-Both Python scripts must be compiled into standalone `.exe` files before the installer can bundle them. Run these commands from the project root on a **Windows** machine.
-
-### 1. Build the Service Executable
-
-```cmd
-pyinstaller --onefile --noupx --hidden-import=win32timezone uploader_service.py
-```
-
-The output will be at `dist\uploader_service.exe`.
-
-> **`--hidden-import=win32timezone`** is required — `pywin32` services need this import at runtime but PyInstaller won't detect it automatically.
-
-### 2. Build the Installer GUI Executable
-
-The installer bundles `uploader_service.exe` inside itself so it can copy it during installation:
-
-```cmd
-pyinstaller --onefile --windowed --add-data "dist\uploader_service.exe;." installer_gui.py
-```
-
 | Flag | Purpose |
 |---|---|
 | `--onefile` | Produces a single portable `.exe` |
