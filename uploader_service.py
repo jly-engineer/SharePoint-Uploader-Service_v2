@@ -22,9 +22,9 @@ else:
 
 def get_config():
     """Reads config.ini from the bundle directory."""
-    config = configparser.ConfigParser()
+    config = configparser.ConfigParser(interpolation=None)
     config_path = os.path.join(BUNDLE_DIR, 'config.ini')
-    config.read(config_path)
+    config.read(config_path, encoding='utf-8')
     if 'Settings' not in config:
         return {}
     return config['Settings']
@@ -107,7 +107,13 @@ class SharePointUploader:
             )
             scopes = ["https://graph.microsoft.com/.default"]
             result = app.acquire_token_for_client(scopes=scopes)
-            return result.get('access_token')
+            token = result.get('access_token')
+            if not token:
+                logging.error(
+                    f"Token acquisition failed: {result.get('error')} - "
+                    f"{result.get('error_description', 'no details')}"
+                )
+            return token
         except Exception as e:
             logging.error(f"Token error: {e}")
             return None
@@ -134,8 +140,8 @@ class SharePointUploader:
             final_path = remote_path
 
         final_path = final_path.replace('//', '/')
-        site_id = config.get('sharepoint_site_id')
-        drive_id = config.get('document_library_id')
+        site_id = config.get('sharepoint_site_id', '').strip()
+        drive_id = config.get('document_library_id', '').strip()
         base = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}"
 
         try:
@@ -263,10 +269,12 @@ class UploadHandler(FileSystemEventHandler):
         try:
             config = get_config()
             token = self.uploader.get_token(config)
-            if token:
-                success = self.uploader.upload(event.src_path, config, token)
-                if success:
-                    self.registry.record(event.src_path)
+            if not token:
+                logging.error(f"Skipping upload for {filename}: could not acquire token")
+                return
+            success = self.uploader.upload(event.src_path, config, token)
+            if success:
+                self.registry.record(event.src_path)
         except Exception as e:
             logging.error(f"Handler error: {e}")
 

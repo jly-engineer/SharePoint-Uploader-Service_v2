@@ -55,8 +55,8 @@ class InstallerApp:
         require the user to re-enter credentials."""
         if not os.path.exists(INSTALLED_CONFIG):
             return
-        config = configparser.ConfigParser()
-        config.read(INSTALLED_CONFIG)
+        config = configparser.ConfigParser(interpolation=None)
+        config.read(INSTALLED_CONFIG, encoding='utf-8')
         if 'Settings' not in config:
             return
         s = config['Settings']
@@ -177,9 +177,9 @@ class InstallerApp:
             shutil.copy(src_service, dst_service)
 
             # Write config
-            config = configparser.ConfigParser()
+            config = configparser.ConfigParser(interpolation=None)
             config['Settings'] = config_data
-            with open(os.path.join(install_dir, 'config.ini'), 'w') as f:
+            with open(os.path.join(install_dir, 'config.ini'), 'w', encoding='utf-8') as f:
                 config.write(f)
 
             self.update_status("Registering service...")
