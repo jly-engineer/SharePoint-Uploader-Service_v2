@@ -8,6 +8,9 @@ import subprocess
 import ctypes
 import time
 
+INSTALL_DIR = os.path.join(os.environ.get('ProgramFiles', r'C:\Program Files'), 'SharePointUploader')
+INSTALLED_CONFIG = os.path.join(INSTALL_DIR, 'config.ini')
+
 def is_admin():
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
@@ -36,6 +39,8 @@ class InstallerApp:
         self.create_folder_picker("Monitor Folder", "monitor_folder")
         self.create_label_entry("SharePoint Target Folder (Optional)", "target_folder")
         
+        self._load_existing_config()
+
         self.install_btn = tk.Button(root, text="Install / Update Service", command=self.install, bg="#4CAF50", fg="white", font=("Arial", 12, "bold"))
         self.install_btn.pack(pady=(20, 10), fill='x', padx=20)
 
@@ -44,6 +49,31 @@ class InstallerApp:
 
         self.status_label = tk.Label(root, text="Ready", fg="blue")
         self.status_label.pack(pady=5)
+
+    def _load_existing_config(self):
+        """Pre-populate fields from the installed config.ini so updates don't
+        require the user to re-enter credentials."""
+        if not os.path.exists(INSTALLED_CONFIG):
+            return
+        config = configparser.ConfigParser()
+        config.read(INSTALLED_CONFIG)
+        if 'Settings' not in config:
+            return
+        s = config['Settings']
+        field_map = {
+            'tenant_id':                self.entry_tenant_id,
+            'client_id':                self.entry_client_id,
+            'client_secret':            self.entry_client_secret,
+            'sharepoint_site_id':       self.entry_site_id,
+            'document_library_id':      self.entry_drive_id,
+            'monitor_folder':           self.entry_monitor_folder,
+            'sharepoint_target_folder': self.entry_target_folder,
+        }
+        for key, widget in field_map.items():
+            value = s.get(key, '')
+            if value:
+                widget.delete(0, tk.END)
+                widget.insert(0, value)
 
     def create_label_entry(self, label_text, key, show=None):
         frame = tk.Frame(self.root)
@@ -113,7 +143,7 @@ class InstallerApp:
             messagebox.showerror("Error", "Please fill in all required fields.")
             return
 
-        install_dir = os.path.join(os.environ['ProgramFiles'], 'SharePointUploader')
+        install_dir = INSTALL_DIR
         service_name = "SharePointUploaderService"
 
         try:
@@ -172,7 +202,7 @@ class InstallerApp:
             return
 
         service_name = "SharePointUploaderService"
-        install_dir = os.path.join(os.environ['ProgramFiles'], 'SharePointUploader')
+        install_dir = INSTALL_DIR
 
         try:
             self.update_status("Stopping service...")

@@ -3,9 +3,11 @@ import win32service
 import win32event
 import servicemanager
 import configparser
+import json
 import logging
 import os
 import sys
+import threading
 import time
 import msal
 import requests
@@ -39,6 +41,59 @@ def setup_logging():
         datefmt='%Y-%m-%d %H:%M:%S',
         handlers=[logging.FileHandler(log_path)]
     )
+
+class UploadRegistry:
+    """Persists a record of successfully uploaded files to disk so the service
+    does not re-upload files that haven't changed after a restart."""
+
+    def __init__(self):
+        self._path = os.path.join(BUNDLE_DIR, 'uploaded_files.json')
+        self._lock = threading.Lock()
+        self._data = self._load()
+
+    def _load(self):
+        if os.path.exists(self._path):
+            try:
+                with open(self._path, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                logging.warning(f"Registry load failed, starting fresh: {e}")
+        return {}
+
+    def _save(self):
+        try:
+            with open(self._path, 'w') as f:
+                json.dump(self._data, f, indent=2)
+        except Exception as e:
+            logging.error(f"Registry save failed: {e}")
+
+    def already_uploaded(self, file_path):
+        """Returns True if the file's current size+mtime match the registry."""
+        try:
+            stat = os.stat(file_path)
+            key = file_path
+            with self._lock:
+                entry = self._data.get(key)
+            if entry is None:
+                return False
+            return entry['size'] == stat.st_size and entry['mtime'] == stat.st_mtime
+        except OSError:
+            return False
+
+    def record(self, file_path):
+        """Records a successful upload for file_path."""
+        try:
+            stat = os.stat(file_path)
+            with self._lock:
+                self._data[file_path] = {
+                    'size': stat.st_size,
+                    'mtime': stat.st_mtime,
+                    'uploaded_at': time.time(),
+                }
+                self._save()
+        except OSError as e:
+            logging.warning(f"Registry record failed for {file_path}: {e}")
+
 
 class SharePointUploader:
     """Helper class to handle the actual upload logic."""
@@ -88,12 +143,13 @@ class SharePointUploader:
             logging.info(f"Uploading: {rel_path} ({file_size} bytes)")
 
             if file_size <= self.SIMPLE_UPLOAD_LIMIT:
-                self._simple_upload(file_path, rel_path, base, final_path, token)
+                return self._simple_upload(file_path, rel_path, base, final_path, token)
             else:
-                self._chunked_upload(file_path, rel_path, file_size, base, final_path, token)
+                return self._chunked_upload(file_path, rel_path, file_size, base, final_path, token)
 
         except Exception as e:
             logging.error(f"Upload exception for {rel_path}: {e}")
+            return False
 
     def _simple_upload(self, file_path, rel_path, base, final_path, token):
         url = f"{base}/root:/{final_path}:/content?@microsoft.graph.conflictBehavior=replace"
@@ -102,8 +158,10 @@ class SharePointUploader:
             response = requests.put(url, headers=headers, data=f)
         if response.status_code in [200, 201]:
             logging.info(f"Done: {rel_path}")
+            return True
         else:
             logging.error(f"Upload failed: {response.status_code} - {response.text}")
+            return False
 
     def _chunked_upload(self, file_path, rel_path, file_size, base, final_path, token):
         # Step 1: Create an upload session
@@ -113,12 +171,12 @@ class SharePointUploader:
         resp = requests.post(session_url, headers=headers, json=body)
         if resp.status_code != 200:
             logging.error(f"Failed to create upload session for {rel_path}: {resp.status_code} - {resp.text}")
-            return
+            return False
 
         upload_url = resp.json().get('uploadUrl')
         if not upload_url:
             logging.error(f"No uploadUrl in session response for {rel_path}")
-            return
+            return False
 
         # Step 2: Upload in chunks — no Authorization header needed for the upload URL itself
         with open(file_path, 'rb') as f:
@@ -137,16 +195,19 @@ class SharePointUploader:
                 if chunk_resp.status_code not in [200, 201, 202]:
                     logging.error(f"Chunk upload failed at byte {offset} for {rel_path}: "
                                   f"{chunk_resp.status_code} - {chunk_resp.text}")
-                    return
+                    return False
                 offset += len(chunk)
                 logging.info(f"Progress {rel_path}: {offset}/{file_size} bytes")
 
         logging.info(f"Done: {rel_path}")
+        return True
 
 class UploadHandler(FileSystemEventHandler):
     def __init__(self):
         self.uploader = SharePointUploader()
-        # Dictionary to track last upload time per file to prevent double-uploads
+        self.registry = UploadRegistry()
+        # Dictionary to debounce rapid OS-level duplicate events (e.g. multiple
+        # modified events fired while a file is still being written).
         self.last_processed = {}
 
     def wait_for_file_ready(self, file_path, timeout=60):
@@ -175,15 +236,20 @@ class UploadHandler(FileSystemEventHandler):
         if filename.lower() == 'thumbs.db' or filename.startswith('~$') or filename.endswith('.tmp'):
             return
 
-        # 2. DEBOUNCE: Check if we processed this file recently
+        # 2. DEBOUNCE: Check if we processed this file recently (handles rapid
+        #    duplicate OS events while a file is still being written).
         current_time = time.time()
         last_time = self.last_processed.get(event.src_path, 0)
-        
-        # If processed in the last 15 seconds, skip this event
         if (current_time - last_time) < 15:
             return
 
-        # 3. READY CHECK: Wait for scanner to release lock
+        # 3. REGISTRY CHECK: Skip if the file hasn't changed since the last
+        #    successful upload (survives service restarts).
+        if self.registry.already_uploaded(event.src_path):
+            logging.debug(f"Skipping unchanged file: {filename}")
+            return
+
+        # 4. READY CHECK: Wait for scanner to release lock
         try:
             if not self.wait_for_file_ready(event.src_path):
                 logging.warning(f"Timeout waiting for file unlock: {filename}. Skipping.")
@@ -191,14 +257,16 @@ class UploadHandler(FileSystemEventHandler):
         except Exception:
             return
 
-        # Update the timestamp immediately before upload attempt
+        # Update the debounce timestamp immediately before the upload attempt
         self.last_processed[event.src_path] = time.time()
 
         try:
             config = get_config()
             token = self.uploader.get_token(config)
             if token:
-                self.uploader.upload(event.src_path, config, token)
+                success = self.uploader.upload(event.src_path, config, token)
+                if success:
+                    self.registry.record(event.src_path)
         except Exception as e:
             logging.error(f"Handler error: {e}")
 
