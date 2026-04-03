@@ -4,8 +4,8 @@ A Windows background service that monitors a local folder and automatically uplo
 
 ## How It Works
 
-- **`uploader_service.py`** — A `pywin32`-based Windows service that watches a folder with `watchdog`. When a file is created or modified, it authenticates via MSAL (client credentials flow) and uploads the file to SharePoint. Files under 4 MB use a simple PUT; larger files use Graph API's chunked upload session. Temporary files, `Thumbs.db`, and `~$` Office lock files are ignored. A 15-second debounce prevents duplicate uploads.
-- **`installer_gui.py`** — A `tkinter` GUI that collects your Azure AD credentials and folder paths, writes a `config.ini`, copies the service executable to `Program Files\SharePointUploader`, and registers/starts the Windows service — no command line required.
+- **`uploader_service.py`** — A `pywin32`-based Windows service that watches a folder with `watchdog`. When a file is created or modified, it authenticates via MSAL (client credentials flow) and uploads the file to SharePoint. Files under 4 MB use a simple PUT; larger files use Graph API's chunked upload session. Temporary files, `Thumbs.db`, and `~$` Office lock files are ignored. A 15-second debounce prevents duplicate events during writes, and a persistent upload registry (`uploaded_files.json`) prevents re-uploading unchanged files after a service restart.
+- **`installer_gui.py`** — A `tkinter` GUI that collects your Azure AD credentials and folder paths, writes a `config.ini`, copies the service executable to `Program Files\SharePointUploader`, and registers/starts the Windows service — no command line required. If a previous installation is detected, the form is pre-populated from the existing `config.ini` so you don't have to re-enter credentials on updates.
 
 ## Prerequisites
 
@@ -80,6 +80,8 @@ sc start SharePointUploaderService
 ## Logs
 
 The service writes logs to `service.log` in `C:\Program Files\SharePointUploader\`. Check this file to verify uploads or diagnose errors.
+
+An `uploaded_files.json` file is also maintained in the same directory. It records the size and modification time of every successfully uploaded file so the service can skip unchanged files across restarts. You can delete this file to force all files to be re-uploaded on the next service start.
 
 ## Service Management
 
