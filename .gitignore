@@ -29,3 +29,6 @@ htmlcov/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Python generated spec files
+*.spec
